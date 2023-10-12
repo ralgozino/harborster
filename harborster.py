@@ -6,13 +6,14 @@
 import logging
 import math
 import urllib.parse
+import os
 
 import requests
 import requests.auth
 from rich.live import Live
 from rich.table import Table
 
-# logging.basicConfig(level=logging.INFO)
+#  logging.basicConfig(level=logging.DEBUG)
 
 
 class HarborClient:
@@ -30,7 +31,7 @@ class HarborClient:
         if response.status_code == 200:
             return response.json()
         else:
-            logging.ERROR(f'failed to get details for project {project}')
+            logging.error(f'failed to get details for project {project}')
 
     def get_project_repositories(self, project_name: str):
         project = self.get_project(project_name)
@@ -46,7 +47,7 @@ class HarborClient:
             if response.status_code == 200:
                 return response.json()
             else:
-                logging.ERROR(f'failed to get repositories for project {project}')
+                logging.error(f'failed to get repositories for project {project}')
 
     def get_repository_artifacts(self, project_name: str, repository_name: str):
         # For some reason, urlib.quote replaces / with %2f in python but golang uses %252f (double escape)
@@ -60,7 +61,7 @@ class HarborClient:
         if response.status_code == 200:
             return response.json()
         else:
-            logging.ERROR(f'failed to get artifacts for repository {repository_name}')
+            logging.error(f'failed to get artifacts for repository {repository_name}')
 
     def get_artifact_vulnerabilities(self, artifact_endpoint: str):
         # encoded_repository_name = {urllib.parse.quote_plus(repository_name).replace("%2F", "%252F")}
@@ -73,7 +74,7 @@ class HarborClient:
         if response.status_code == 200:
             return response.json()
         else:
-            logging.ERROR('failed to get vulnerabilities for artifact')
+            logging.error('failed to get vulnerabilities for artifact')
 
 
 if __name__ == '__main__':
@@ -85,9 +86,11 @@ if __name__ == '__main__':
     table.add_column("CVEs")
 
     with Live(table, refresh_per_second=4, vertical_overflow='visible') as live:
-        # TODO: take these values from env or params
-        project_name = '<CHANGEME>'
-        hc = HarborClient(hostname='<CHANGEME>', username='<CHANGEME>', password='<CHANGEME>')
+        project_name = os.environ.get('HARBOR_PROJECT_NAME', '')
+        hc = HarborClient(hostname=os.environ.get('HARBOR_HOSTNAME', ''),
+                          username=os.environ.get('HARBOR_USERNAME', ''),
+                          password=os.environ.get('HARBOR_PASSWORD', ''),
+                          )
         repositories = hc.get_project_repositories(project_name)
         for repository in repositories:
             repository_name = repository["name"].lstrip(project_name + "/")
@@ -95,7 +98,12 @@ if __name__ == '__main__':
             for artifact in artifacts:
                 # live.console.print(f"getting vulnerabilities list for {repository['name']}/{artifact['digest']}")
                 vulnerabilities = hc.get_artifact_vulnerabilities(artifact["addition_links"]["vulnerabilities"]["href"])
-                vulns = vulnerabilities['application/vnd.scanner.adapter.vuln.report.harbor+json; version=1.0']["vulnerabilities"]
+                logging.debug(vulnerabilities)
+                if vulnerabilities.get('application/vnd.security.vulnerability.report; version=1.1'):
+                    vulns = vulnerabilities.get('application/vnd.security.vulnerability.report; version=1.1')["vulnerabilities"]
+                else:
+                    logging.info(f'there are no vulnerabilities information for artifact {artifact}. Skipping.')
+                    continue
                 tags_list = []
                 if artifact.get("tags"):
                     for tag in artifact.get("tags"):
